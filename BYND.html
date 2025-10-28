@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BYND Trader - Gráfico y Estrategia</title>
+
+  <!-- Librerías con defer -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon" defer></script>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #121a2a;
+      --text: #e2e8f0;
+      --green: #10b981;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --blue: #3b82f6;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      padding: 0.75rem;
+      font-size: 14px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { text-align: center; margin: 0.75rem 0; color: var(--blue); letter-spacing: .2px; font-size: 1.4rem; }
+    .chart-box { 
+      height: 170px; background: var(--card); border-radius: 10px; padding: .6rem; margin: 0.75rem 0; position: relative;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    .card {
+      background: var(--card);
+      padding: 0.9rem 1rem;
+      border-radius: 10px;
+      margin: 0.75rem 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; align-items: center; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    @media (max-width: 900px) { .grid, .grid-3 { grid-template-columns: 1fr; } }
+    input, button, select {
+      padding: 0.55rem; border: none; border-radius: 6px; font-size: 0.95rem; margin: 0.4rem 0;
+    }
+    input, select { background: #334155; color: white; width: 100%; outline: none; }
+    button {
+      background: var(--blue); color: white; cursor: pointer; font-weight: 600;
+      transition: transform .15s ease, background .2s ease;
+    }
+    button:hover { background: #2563eb; transform: translateY(-1px); }
+    .btn-success { background: var(--green); }
+    .btn-danger { background: var(--red); }
+    .btn-warning { background: var(--yellow); color: black; }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; table-layout: fixed; font-size: 0.95rem; }
+    th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    th { background: #162133; font-weight: 600; }
+    .price { font-size: 1.6rem; font-weight: 800; text-align: center; margin: .15rem 0 .35rem; }
+    .price.up { color: var(--green); }
+    .price.down { color: var(--red); }
+    .subtle { opacity: .85; text-align: center; font-size: 0.95rem; }
+    .alert { padding: 1rem; border-radius: 8px; margin: 1rem 0 0; font-weight: 600; border: 1px solid transparent; }
+    .alert-success { background: #052e26; border-color: #064e3b; color: var(--green); }
+    .alert-warning { background: #3a2505; border-color: #92400e; color: var(--yellow); }
+    .alert-danger { background: #3a0d0d; border-color: #7f1d1d; color: var(--red); }
+    .alert-neutral { background: #1e293b; border-color: #334155; color: var(--text); }
+    .actions-row { display: flex; gap: .4rem; flex-wrap: wrap; }
+    .tabs { display:flex; gap:.4rem; margin-bottom:.4rem; }
+    .tab { background:#243041; padding:.4rem .6rem; border-radius:6px; cursor:pointer; font-weight:700; font-size:0.95rem; }
+    .tab.active { background:#1b2533; outline:1px solid #334155; }
+    .muted { opacity:.8; font-size:.95rem; }
+    .conn-grid { display:grid; grid-template-columns: 2fr auto; gap: .5rem; }
+    @media (max-width: 600px) { .conn-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>BYND Trader - Precio en Vivo</h1>
+
+    <!-- Precio -->
+    <div class="card">
+      <div id="price" class="price">Cargando…</div>
+      <div id="change" class="subtle"></div>
+      <div class="subtle" id="lastUpdate">—</div>
+      <div class="muted" id="connHint" style="text-align:center;margin-top:.25rem"></div>
+    </div>
+
+    <!-- Gráfico -->
+    <div class="card">
+      <div class="chart-box"><canvas id="chart"></canvas></div>
+    </div>
+
+    <!-- Conexión / Proxy -->
+    <div class="card">
+      <h2 style="margin-bottom:.5rem">Conexión</h2>
+      <div class="conn-grid">
+        <input id="customProxy" placeholder="Proxy personalizado (opcional) — ej: https://tu-dominio.com/proxy/" />
+        <button id="btnProbar" class="btn-warning">Probar conexión</button>
+      </div>
+      <div class="muted">Tips: si abres este archivo con <strong>file://</strong>, muchos proxys fallan por CORS. Usa un servidor local (p. ej. VSCode <em>Live Server</em>) o un proxy propio.</div>
+    </div>
+
+    <!-- Formulario -->
+    <div class="card">
+      <div class="tabs">
+        <div class="tab active" id="tabBuy">Añadir Compra</div>
+        <div class="tab" id="tabSell">Añadir Venta</div>
+      </div>
+      <div id="panelBuy">
+        <div class="grid-3">
+          <input type="number" id="cantidad" placeholder="Cantidad" step="0.01" min="0" />
+          <input type="number" id="precio" placeholder="Precio ($)" step="0.01" min="0" />
+          <input type="number" id="comision" placeholder="Comisión ($)" step="0.01" min="0" value="0" />
+        </div>
+        <div class="actions-row">
+          <button id="btnGuardar">Guardar compra</button>
+        </div>
+      </div>
+      <div id="panelSell" style="display:none">
+        <div class="grid-3">
+          <input type="number" id="cantidadVenta" placeholder="Cantidad" step="0.01" min="0" />
+          <input type="number" id="precioVenta" placeholder="Precio ($)" step="0.01" min="0" />
+          <input type="number" id="comisionVenta" placeholder="Comisión ($)" step="0.01" min="0" value="0" />
+        </div>
+        <div class="actions-row">
+          <button id="btnGuardarVenta" class="btn-warning">Guardar venta</button>
+        </div>
+      </div>
+      <div class="actions-row" style="margin-top:.25rem">
+        <button id="btnBorrarTodo" class="btn-danger">Borrar todo</button>
+      </div>
+    </div>
+
+    <!-- Alertas personalizadas -->
+    <div class="card">
+      <h2 style="margin-bottom:.25rem">Alertas personalizadas</h2>
+      <div class="grid-3">
+        <select id="alertDir">
+          <option value="above">Cuando el precio SUBA A/≥</option>
+          <option value="below">Cuando el precio BAJE A/≤</option>
+        </select>
+        <input type="number" id="alertPrice" placeholder="Precio objetivo ($)" step="0.01" min="0" />
+        <input id="alertNote" placeholder="Nota (opcional)" />
+      </div>
+      <div class="actions-row">
+        <label style="display:flex;align-items:center;gap:.5rem"><input type="checkbox" id="alertRepeat"/> Repetir cada vez que cruce</label>
+        <button id="btnAddAlert" class="btn-success">Añadir alerta</button>
+      </div>
+      <table id="tablaAlertas" style="margin-top:.5rem">
+        <thead><tr><th>Dirección</th><th>Precio</th><th>Repetir</th><th>Último disparo</th><th>Estado</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Resumen -->
+    <div class="card">
+      <h2 style="margin-bottom:.5rem">Resumen</h2>
+      <div class="grid" style="row-gap:.5rem">
+        <div><strong>Acciones actuales:</strong> <span id="totalAcciones">0</span></div>
+        <div><strong>Precio medio (coste):</strong> <span id="precioMedio">$0.00</span></div>
+        <div><strong>Valor actual:</strong> <span id="valorActual">$0.00</span></div>
+        <div><strong>PNL realizado:</strong> <span id="pnlRealizado">$0.00</span></div>
+        <div><strong>PNL no realizado:</strong> <span id="pnlNoRealizado">$0.00</span></div>
+        <div><strong>Ganancia neta total:</strong> <span id="gananciaNeta">$0.00</span></div>
+      </div>
+      <div id="sugerencia" class="alert alert-neutral" style="margin-top:1rem">Aún no tienes movimientos.</div>
+    </div>
+
+    <!-- Historial -->
+    <div class="card">
+      <h2 style="margin-bottom:.5rem">Historial</h2>
+      <table id="tablaMovs">
+        <thead><tr><th>Fecha</th><th>Tipo</th><th>Cant.</th><th>Precio</th><th>Comisión</th><th>Total</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // === CONFIGURACIÓN GLOBAL ===
+    const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+    const NUM = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
+    let precioActual = 0, precioAnterior = 0, ultimoTS = 0;
+    let movimientos = [];
+    let chart = null;
+    let intervalId = null;
+    let intervalMs = 10000;
+    let alertas = [];
+
+    // === ELEMENTOS ===
+    const el = id => document.getElementById(id);
+    const priceEl = el('price');
+    const changeEl = el('change');
+    const lastUpdateEl = el('lastUpdate');
+    const connHintEl = el('connHint');
+
+    // === PERSISTENCIA ===
+    const cargarMovs = () => {
+      try {
+        const rawMovs = localStorage.getItem('bynd_movs');
+        movimientos = rawMovs ? JSON.parse(rawMovs) : [];
+        if (!Array.isArray(movimientos)) movimientos = [];
+      } catch { movimientos = []; }
+      const cp = localStorage.getItem('bynd_proxy') || '';
+      el('customProxy').value = cp;
+      try {
+        const rawAlerts = localStorage.getItem('bynd_alerts');
+        alertas = rawAlerts ? JSON.parse(rawAlerts) : [];
+        if (!Array.isArray(alertas)) alertas = [];
+      } catch { alertas = []; }
+    };
+    const guardarMovs = () => localStorage.setItem('bynd_movs', JSON.stringify(movimientos));
+    const guardarAlertas = () => localStorage.setItem('bynd_alerts', JSON.stringify(alertas));
+
+    // === INICIALIZAR GRÁFICO ===
+    const initChart = () => {
+      const ctx = el('chart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [{
+          label: 'BYND ($)',
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59,130,246,.12)',
+          fill: true,
+          tension: .25,
+          pointRadius: 0,
+          borderWidth: 2,
+        }]},
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ` ${USD.format(ctx.parsed.y)}` } },
+            decimation: { enabled: true, algorithm: 'lttb' }
+          },
+          scales: {
+            x: { type: 'time', time: { unit: 'minute' }, grid: { color: '#243041' }, ticks: { color: '#94a3b8' } },
+            y: { beginAtZero: false, grid: { color: '#243041' }, ticks: { color: '#94a3b8', callback: v => USD.format(v) } }
+          }
+        }
+      });
+    };
+
+    // === FETCH ROBUSTO ===
+    const YAHOO_URL = 'https://query1.finance.yahoo.com/v8/finance/chart/BYND?interval=1m&range=1d';
+    const BUILTIN_PROXIES = [
+      (url) => `https://cors.isomorphic-git.org/${url}`,
+      (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
+      (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    ];
+
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    const fetchWithTimeout = async (url, { timeout = 4500 } = {}) => {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort('timeout'), timeout);
+      try {
+        const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const txt = await res.text();
+        return JSON.parse(txt);
+      } finally { clearTimeout(id); }
+    };
+
+    const raceProxies = async () => {
+      const urlTs = `${YAHOO_URL}&ts=${Date.now()}`;
+      const custom = (localStorage.getItem('bynd_proxy') || '').trim();
+      const list = [];
+      if (custom) list.push((u) => custom.endsWith('/') ? `${custom}${u}` : `${custom}/${u}`);
+      list.push(...BUILTIN_PROXIES);
+
+      const racers = list.map((b, i) => new Promise(async (resolve, reject) => {
+        try {
+          await sleep(i * 250);
+          const data = await fetchWithTimeout(b(urlTs), { timeout: 5000 + i*1500 });
+          if (!data?.chart?.result?.[0]) return reject(new Error('Respuesta inválida'));
+          resolve({ data, idx: i });
+        } catch (e) { reject(e); }
+      }));
+
+      return Promise.any(racers);
+    };
+
+    const fetchYahoo = async () => {
+      if (location.protocol === 'file:') {
+        connHintEl.textContent = 'Estás usando file:// — algunos proxys fallarán por CORS. Usa un servidor local.';
+      }
+      let attempt = 0;
+      let lastErr = null;
+      while (attempt < 3) {
+        try {
+          const { data, idx } = await raceProxies();
+          connHintEl.textContent = `Conectado (proxy #${idx+1}${localStorage.getItem('bynd_proxy') ? ' + personalizado' : ''})`;
+          if (intervalMs !== 10000) { intervalMs = 10000; restartInterval(); }
+          return data;
+        } catch (e) {
+          lastErr = e;
+          attempt++;
+          connHintEl.textContent = `Reintentando conexión… (${attempt}/3)`;
+          await sleep(400 * attempt);
+        }
+      }
+      throw lastErr ?? new Error('Sin conexión');
+    };
+
+    // === CARGAR DATOS INICIALES ===
+    const alimentarInicial = (data) => {
+      try {
+        const r = data.chart.result[0];
+        const ts = r.timestamp || [];
+        const closes = r.indicators?.quote?.[0]?.close || [];
+        const puntos = [];
+        for (let i = 0; i < ts.length; i++) {
+          if (typeof closes[i] === 'number') {
+            puntos.push({ x: ts[i] * 1000, y: closes[i] });
+          }
+        }
+        if (puntos.length) {
+          chart.data.datasets[0].data = puntos.slice(-360);
+          ultimoTS = puntos[puntos.length - 1].x;
+          precioActual = puntos[puntos.length - 1].y;
+          precioAnterior = puntos.length > 1 ? puntos[puntos.length - 2].y : precioActual;
+          chart.update('none');
+        }
+      } catch (e) {
+        console.error('Error inicial:', e);
+      }
+    };
+
+    // === ACTUALIZAR PRECIO ===
+    const updatePrice = async () => {
+      try {
+        const data = await fetchYahoo();
+        const r = data.chart.result[0];
+        const meta = r.meta;
+        const tsArr = r.timestamp || [];
+        const closes = r.indicators?.quote?.[0]?.close || [];
+        let idx = closes.length - 1;
+        while (idx >= 0 && typeof closes[idx] !== 'number') idx--;
+        const close = idx >= 0 ? closes[idx] : meta.regularMarketPrice;
+        const ts = idx >= 0 ? (tsArr[idx] || Date.now() / 1000) * 1000 : meta.regularMarketTime * 1000;
+
+        precioAnterior = precioActual;
+        precioActual = close;
+
+        priceEl.textContent = USD.format(close);
+        priceEl.className = 'price ' + (close > precioAnterior ? 'up' : close < precioAnterior ? 'down' : '');
+        const diff = close - meta.previousClose;
+        const pct = meta.previousClose ? ((diff / meta.previousClose) * 100).toFixed(2) : '0.00';
+        changeEl.textContent = `${diff > 0 ? '+' : ''}${USD.format(diff)} (${pct}%)`;
+        lastUpdateEl.textContent = `Última: ${new Date(ts).toLocaleTimeString()}`;
+
+        if (ts > ultimoTS) {
+          chart.data.datasets[0].data.push({ x: ts, y: close });
+          if (chart.data.datasets[0].data.length > 720) chart.data.datasets[0].data.shift();
+          chart.update('none');
+          ultimoTS = ts;
+        }
+
+        updateResumen();
+        evaluarAlertas();
+        evaluarAlertasPersonalizadas();
+      } catch (e) {
+        console.warn('updatePrice fallo:', e);
+        priceEl.textContent = 'Error de conexión';
+        priceEl.className = 'price';
+        connHintEl.textContent = 'Sin conexión estable. Aplicando backoff…';
+        intervalMs = Math.min(intervalMs * 1.6, 60000);
+        restartInterval();
+      }
+    };
+
+    const restartInterval = () => {
+      if (intervalId) clearInterval(intervalId);
+      intervalId = setInterval(updatePrice, intervalMs);
+    };
+
+    // === MOVIMIENTOS (FIFO) ===
+    const addCompra = () => {
+      const cantidad = parseFloat(el('cantidad').value.replace(',', '.'));
+      const precio = parseFloat(el('precio').value.replace(',', '.'));
+      const comision = parseFloat(el('comision').value.replace(',', '.')) || 0;
+      if (!cantidad || !precio || cantidad <= 0 || precio <= 0) { alert('Completa cantidad y precio válidos.'); return; }
+      movimientos.push({ id: Date.now(), fechaISO: new Date().toISOString(), tipo: 'BUY', cantidad, precio, comision, total: cantidad * precio + comision });
+      guardarMovs(); renderTabla(); updateResumen(); limpiarFormulario();
+    };
+
+    const addVenta = () => {
+      const cantidad = parseFloat(el('cantidadVenta').value.replace(',', '.'));
+      const precio = parseFloat(el('precioVenta').value.replace(',', '.'));
+      const comision = parseFloat(el('comisionVenta').value.replace(',', '.')) || 0;
+      if (!cantidad || !precio || cantidad <= 0 || precio <= 0) { alert('Completa cantidad y precio válidos.'); return; }
+      const st = calcularEstado();
+      if (cantidad > st.shares) { alert(`No puedes vender más de lo que tienes. Tienes: ${NUM.format(st.shares)}`); return; }
+      const total = cantidad * precio - comision;
+      movimientos.push({ id: Date.now(), fechaISO: new Date().toISOString(), tipo: 'SELL', cantidad, precio, comision, total });
+      guardarMovs(); renderTabla(); updateResumen(); limpiarFormularioVenta();
+    };
+
+    const eliminarMov = (id) => { movimientos = movimientos.filter(m => m.id !== id); guardarMovs(); renderTabla(); updateResumen(); };
+    const limpiarTodo = () => { if (confirm('¿Borrar todo el historial?')) { movimientos = []; localStorage.removeItem('bynd_movs'); renderTabla(); updateResumen(); } };
+    const limpiarFormulario = () => { el('cantidad').value = ''; el('precio').value = ''; el('comision').value = '0'; };
+    const limpiarFormularioVenta = () => { el('cantidadVenta').value = ''; el('precioVenta').value = ''; el('comisionVenta').value = '0'; };
+
+    // === CÁLCULO FIFO (CORREGIDO) ===
+    const calcularEstado = () => {
+      const buys = movimientos
+        .filter(m => m.tipo === 'BUY')
+        .map(m => ({ ...m, remaining: m.cantidad }));
+
+      let shares = 0;
+      let totalCost = 0;
+      let realized = 0;
+
+      for (const m of movimientos) {
+        if (m.tipo === 'BUY') {
+          shares += m.cantidad;
+          totalCost += m.cantidad * m.precio + m.comision;
+        } else if (m.tipo === 'SELL') {
+          let remainingToSell = m.cantidad;
+          let costBasis = 0;
+
+          for (const buy of buys) {
+            if (remainingToSell <= 0) break;
+            if (buy.remaining <= 0) continue;
+            const sellFromThis = Math.min(remainingToSell, buy.remaining);
+            costBasis += sellFromThis * buy.precio;
+            buy.remaining -= sellFromThis;
+            remainingToSell -= sellFromThis;
+          }
+
+          const revenue = m.cantidad * m.precio - m.comision;
+          realized += revenue - costBasis;
+
+          shares -= m.cantidad;
+          totalCost -= costBasis;
+        }
+      }
+
+      const avgCost = shares > 0 ? totalCost / shares : 0;
+      return { shares, avgCost, realized };
+    };
+
+    const renderTabla = () => {
+      const tbody = el('tablaMovs').querySelector('tbody');
+      tbody.innerHTML = '';
+      [...movimientos].sort((a, b) => b.id - a.id).forEach(m => {
+        const tr = document.createElement('tr');
+        const fecha = new Date(m.fechaISO).toLocaleString();
+        tr.innerHTML = `
+          <td>${fecha}</td>
+          <td>${m.tipo === 'BUY' ? 'Compra' : 'Venta'}</td>
+          <td>${NUM.format(m.cantidad)}</td>
+          <td>${USD.format(m.precio)}</td>
+          <td>${USD.format(m.comision)}</td>
+          <td>${USD.format(m.total)}</td>
+          <td><button class="btn-danger" data-id="${m.id}" style="padding:.3rem .6rem;font-size:.85rem;">×</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button').forEach(btn => { btn.onclick = () => eliminarMov(+btn.dataset.id); });
+    };
+
+    const updateResumen = () => {
+      const st = calcularEstado();
+      const totalAcciones = st.shares;
+      const precioMedio = st.avgCost;
+      const valorActual = totalAcciones * (precioActual || 0);
+      const pnlNoReal = totalAcciones * ((precioActual || 0) - precioMedio);
+      const pnlReal = st.realized;
+      const gananciaNeta = pnlReal + pnlNoReal;
+
+      el('totalAcciones').textContent = NUM.format(totalAcciones);
+      el('precioMedio').textContent = USD.format(precioMedio || 0);
+      el('valorActual').textContent = USD.format(valorActual || 0);
+      const pnlR = el('pnlRealizado'); pnlR.textContent = USD.format(pnlReal); pnlR.style.color = pnlReal >= 0 ? 'var(--green)' : 'var(--red)';
+      const pnlNR = el('pnlNoRealizado'); pnlNR.textContent = USD.format(pnlNoReal); pnlNR.style.color = pnlNoReal >= 0 ? 'var(--green)' : 'var(--red)';
+      const gnEl = el('gananciaNeta'); gnEl.textContent = USD.format(gananciaNeta); gnEl.style.color = gananciaNeta >= 0 ? 'var(--green)' : 'var(--red)';
+
+      const sugerencia = el('sugerencia');
+      if (!movimientos.length || !totalAcciones || !precioActual) {
+        sugerencia.className = 'alert alert-neutral';
+        sugerencia.textContent = 'Aún no tienes movimientos.';
+        return;
+      }
+
+      const ratio = precioActual / precioMedio;
+
+      if (ratio <= 0.95) {
+        const comprar = Math.max(1, Math.round(totalAcciones * 0.3));
+        sugerencia.className = 'alert alert-success';
+        sugerencia.innerHTML = `COMPRA: -${(100 - ratio*100).toFixed(1)}%.<br>Compra <strong>${NUM.format(comprar)}</strong> acciones.`;
+      } else if (ratio >= 1.25) {
+        sugerencia.className = 'alert alert-danger';
+        sugerencia.innerHTML = `VENDE TODO: +25%.<br>Vende tus <strong>${NUM.format(totalAcciones)}</strong> acciones.`;
+      } else if (ratio >= 1.10) {
+        const vender = Math.max(1, Math.round(totalAcciones * 0.3));
+        sugerencia.className = 'alert alert-warning';
+        sugerencia.innerHTML = `VENDE 30%: +10%.<br>Vende <strong>${NUM.format(vender)}</strong> acciones.`; // CORREGIDO
+      } else {
+        sugerencia.className = 'alert alert-neutral';
+        sugerencia.textContent = 'Espera: precio estable.';
+      }
+    };
+
+    // === NOTIFICACIONES ===
+    const pedirPermisosNoti = async () => {
+      if (!('Notification' in window)) return false;
+      if (Notification.permission === 'default') {
+        try {
+          const permiso = await Notification.requestPermission();
+          return permiso === 'granted';
+        } catch { return false; }
+      }
+      return Notification.permission === 'granted';
+    };
+
+    const notificar = (texto) => {
+      if (Notification.permission === 'granted') {
+        new Notification('BYND Trader', { body: texto });
+      }
+    };
+
+    let estadoAlertas = { buy: false, take10: false, take25: false };
+    const evaluarAlertas = () => {
+      const { shares, avgCost } = calcularEstado();
+      if (!shares || !avgCost || !precioActual) return;
+      const under5 = precioActual < avgCost * 0.95;
+      const over10 = precioActual >= avgCost * 1.10 && precioActual < avgCost * 1.25;
+      const over25 = precioActual >= avgCost * 1.25;
+      if (under5 && !estadoAlertas.buy) { notificar('¡BYND -5% vs tu precio medio! Considera comprar.'); estadoAlertas.buy = true; }
+      if (over10 && !estadoAlertas.take10) { notificar('BYND +10% vs tu precio medio. Considera vender 30%.'); estadoAlertas.take10 = true; }
+      if (over25 && !estadoAlertas.take25) { notificar('BYND +25% vs tu precio medio. Señal de vender todo.'); estadoAlertas.take25 = true; }
+      if (!under5) estadoAlertas.buy = false;
+      if (!over10) estadoAlertas.take10 = false;
+      if (!over25) estadoAlertas.take25 = false;
+    };
+
+    // === ALERTAS PERSONALIZADAS ===
+    const renderAlertas = () => {
+      const tbody = el('tablaAlertas').querySelector('tbody');
+      tbody.innerHTML = '';
+      [...alertas].sort((a,b)=>b.id-a.id).forEach(a => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${a.dir === 'above' ? 'Sube a/≥' : 'Baja a/≤'}${a.note ? `<div class="muted">${a.note}</div>`:''}</td>
+          <td>${USD.format(a.price)}</td>
+          <td>${a.repeat ? 'Sí' : 'No'}</td>
+          <td>${a.lastTriggered ? new Date(a.lastTriggered).toLocaleString() : '—'}</td>
+          <td>${a.isEnabled ? 'Activa' : 'Pausada'}</td>
+          <td>
+            <div class="actions-row">
+              <button data-act="toggle" data-id="${a.id}">${a.isEnabled ? 'Pausar' : 'Activar'}</button>
+              <button class="btn-warning" data-act="reset" data-id="${a.id}">Rearmar</button>
+              <button class="btn-danger" data-act="del" data-id="${a.id}">Eliminar</button>
+            </div>
+          </td>`;
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button').forEach(btn => {
+        const id = +btn.dataset.id; const act = btn.dataset.act;
+        btn.onclick = () => {
+          if (act==='toggle') { const a = alertas.find(x=>x.id===id); if (a) { a.isEnabled = !a.isEnabled; guardarAlertas(); renderAlertas(); } }
+          if (act==='reset') { const a = alertas.find(x=>x.id===id); if (a) { a.triggered = false; a.lastTriggered = null; guardarAlertas(); renderAlertas(); } }
+          if (act==='del') { alertas = alertas.filter(x=>x.id!==id); guardarAlertas(); renderAlertas(); }
+        };
+      });
+    };
+
+    const addAlerta = () => {
+      const dir = el('alertDir').value;
+      const price = parseFloat(el('alertPrice').value.replace(',', '.'));
+      const note = (el('alertNote').value || '').trim();
+      const repeat = el('alertRepeat').checked;
+      if (!price || price <= 0) { alert('Introduce un precio válido.'); return; }
+      alertas.push({ id: Date.now(), dir, price, note, repeat, isEnabled: true, triggered: false, lastTriggered: null });
+      guardarAlertas();
+      renderAlertas();
+      el('alertPrice').value = '';
+      el('alertNote').value = '';
+      el('alertRepeat').checked = false;
+    };
+
+    const evaluarAlertasPersonalizadas = () => {
+      if (!precioActual) return;
+      let cambios = false;
+      for (const a of alertas) {
+        if (!a.isEnabled) continue;
+        const cond = a.dir === 'above' ? (precioActual >= a.price) : (precioActual <= a.price);
+        if (cond && (a.repeat || !a.triggered)) {
+          const dirTxt = a.dir === 'above' ? 'subió a' : 'bajó a';
+          notificar(`Alerta: precio ${dirTxt} ${USD.format(a.price)} ${a.note ? '(' + a.note + ')' : ''}`);
+          a.triggered = true;
+          a.lastTriggered = Date.now();
+          cambios = true;
+        }
+        if (a.repeat && a.triggered) {
+          const away = a.dir === 'above' ? (precioActual < a.price) : (precioActual > a.price);
+          if (away) { a.triggered = false; cambios = true; }
+        }
+      }
+      if (cambios) { guardarAlertas(); renderAlertas(); }
+    };
+
+    // === CONEXIÓN ===
+    const probarConexion = async () => {
+      const v = el('customProxy').value.trim();
+      if (v) localStorage.setItem('bynd_proxy', v); else localStorage.removeItem('bynd_proxy');
+      connHintEl.textContent = 'Probando…';
+      try {
+        const { data, idx } = await raceProxies();
+        if (data?.chart?.result?.[0]) {
+          connHintEl.textContent = `OK. Fuente conectada (proxy #${idx+1}${v ? ' + personalizado' : ''}).`;
+        } else {
+          connHintEl.textContent = 'Respuesta inválida del proxy.';
+        }
+      } catch (e) {
+        connHintEl.textContent = 'No se pudo conectar. Revisa el proxy o usa un servidor local.';
+      }
+    };
+
+    // === INICIO ===
+    const start = async () => {
+      cargarMovs();
+      initChart();
+      renderTabla();
+      renderAlertas();
+      updateResumen();
+
+      const permisos = await pedirPermisosNoti();
+      if (!permisos) console.warn('Notificaciones no permitidas');
+
+      fetchYahoo().then(alimentarInicial).catch(err => {
+        console.warn(err);
+        connHintEl.textContent = 'No se pudo cargar datos iniciales. Reintentando…';
+      }).finally(() => {
+        updatePrice();
+        restartInterval();
+      });
+
+      el('btnGuardar').onclick = addCompra;
+      el('btnGuardarVenta').onclick = addVenta;
+      el('btnBorrarTodo').onclick = limpiarTodo;
+      el('btnProbar').onclick = probarConexion;
+      el('btnAddAlert').onclick = addAlerta;
+      ['cantidad','precio','comision'].forEach(id => el(id).addEventListener('keydown', e => { if (e.key === 'Enter') addCompra(); }));
+      ['cantidadVenta','precioVenta','comisionVenta'].forEach(id => el(id).addEventListener('keydown', e => { if (e.key === 'Enter') addVenta(); }));
+
+      el('tabBuy').onclick = () => { el('tabBuy').classList.add('active'); el('tabSell').classList.remove('active'); el('panelBuy').style.display='block'; el('panelSell').style.display='none'; };
+      el('tabSell').onclick = () => { el('tabSell').classList.add('active'); el('tabBuy').classList.remove('active'); el('panelSell').style.display='block'; el('panelBuy').style.display='none'; };
+
+      window.addEventListener('blur', () => { if (intervalId) { clearInterval(intervalId); intervalId = null; } });
+      window.addEventListener('focus', () => { if (!intervalId) { updatePrice(); restartInterval(); } });
+    };
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      if (typeof Chart !== 'undefined') await start();
+      else setTimeout(() => start().catch(console.error), 150);
+    });
+  </script>
+</body>
+</html>
